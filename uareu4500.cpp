@@ -3,20 +3,23 @@
 #include <dpfj.h>
 #include <vector>
 #include <fstream>
+#include <cstring>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/buffer.h>
 
 extern "C" {
 	__declspec(dllexport) int init_library() {
 		int result;
-		// Inicializa la librería
+		// Initialize library
 		result = dpfpdd_init();
-		if (result == DPFPDD_SUCCESS) {
-			std::cout << "Libreria abierta exitosamente: " << result << std::endl;
-			return 0;
-		}
+		switch (result) {
+			case DPFPDD_SUCCESS:
+				std::cout << "Libreria abierta exitosamente: " << result << std::endl;
+				return 0;
 
-		if (result == DPFPDD_E_FAILURE) {
-			std::cerr << "Error al inicializar la librería: " << result << std::endl;
-			return -1;
+			case DPFPDD_E_FAILURE:
+				std::cerr << "Error al inicializar la librería: " << result << std::endl;
 		}
 
 		return -1;
@@ -24,43 +27,40 @@ extern "C" {
 
 	__declspec(dllexport) int search_devices(std::string &device_name){
 		int result;
-		// Abrir dispositivos y obtener el nombre del dispositivo
+		// Open devices and get device name
 		std::cout << "Buscando dispositivos... " << std::endl;
-		// devInfo.size = sizeof(devInfo);
 		unsigned int dev_cnt = 0;
 		
-		result = dpfpdd_query_devices(&dev_cnt, nullptr );
-		std::cout << "Número de dispositivos detectados: " << dev_cnt << std::endl;
+		result = dpfpdd_query_devices(&dev_cnt, nullptr ); // First call just to get the needed memory size
 		if (result == DPFPDD_E_MORE_DATA || result == DPFPDD_SUCCESS) {
 			std::cout << "Número de dispositivos detectados: " << dev_cnt << std::endl;
 
-			// Asignar memoria para almacenar la información de los dispositivos
+			// Asign memory to store device data
 			DPFPDD_DEV_INFO* dev_infos = new DPFPDD_DEV_INFO[dev_cnt];
 			for (unsigned int i = 0; i < dev_cnt; ++i) {
-				dev_infos[i].size = sizeof(DPFPDD_DEV_INFO); // Asegúrate de inicializar el campo 'size'
+				dev_infos[i].size = sizeof(DPFPDD_DEV_INFO);
 			}
 
-			// Segunda llamada para obtener la información de los dispositivos
+			// Second call to actually get device data
 			result = dpfpdd_query_devices(&dev_cnt, dev_infos);
 			if (result == DPFPDD_SUCCESS) {
 				std::cout << "Dispositivos listados exitosamente." << std::endl;
+				// Show devices info
+				// for (unsigned int i = 0; i < dev_cnt; ++i) {
+				// 	std::cout << "Dispositivo " << i + 1 << ": " << dev_infos[i].name << std::endl;
+				// }
 
-				// Mostrar información de cada dispositivo
-				for (unsigned int i = 0; i < dev_cnt; ++i) {
-					std::cout << "Dispositivo " << i + 1 << ": " << dev_infos[i].name << std::endl;
-				}
-
+				// Set the first detected device as our reader
 				device_name = dev_infos[0].name;
 
 			} else {
 				std::cerr << "Error al listar los dispositivos: " << result << std::endl;
 			}
 
-			// Liberar la memoria asignada
+			// Free asigned memory
 			delete[] dev_infos;
 		} else {
 			std::cerr << "Error al obtener el número de dispositivos: " << result << std::endl;
-			return -1;
 		}
 
 		return -1;
@@ -72,28 +72,57 @@ extern "C" {
 		
 		char* device_name_cstr = const_cast<char*>(device_name.c_str());
 		result = dpfpdd_open(device_name_cstr, &hReader);
-		if (result == DPFPDD_SUCCESS) {
-			std::cout << "Dispositivo abierto exitosamente: " << result << std::endl;
+
+		switch (result){
+			case DPFPDD_SUCCESS:
+				std::cout << "Dispositivo abierto exitosamente: " << result << std::endl;
+				return 0;
+			
+			case DPFPDD_E_FAILURE:
+				std::cerr << "Fallo inesperado al abrir dispositivo: " << result << std::endl;
+				break;
+			
+			case DPFPDD_E_INVALID_PARAMETER:
+				std::cerr << "No se encuentra un dispositivo con el nombre: " << device_name << std::endl;
+				break;
+				
+			case DPFPDD_E_DEVICE_BUSY:
+				std::cerr << "El dispositivo fue abierto por otro proceso: " << device_name << std::endl;
+				break;
+
+			case DPFPDD_E_DEVICE_FAILURE:
+				std::cerr << "Error al abrir dispositivo: " << device_name << std::endl;
+				break;
 		}
 
-		if (result == DPFPDD_E_FAILURE) {
-			std::cerr << "Fallo inesperado al abrir dispositivo: " << result << std::endl;
-			return -1;
-		}
+		return -1;
+	}
 
-		if (result == DPFPDD_E_INVALID_PARAMETER) {
-			std::cerr << "No se encuentra un dispositivo con el nombre: " << device_name << std::endl;
-			return -1;
-		}
+	__declspec(dllexport) int close_device(DPFPDD_DEV hReader){
+		int result;
+		std::cout << "Cerrando dispositivo... " << std::endl;
+		result =dpfpdd_close(hReader);
 
-		if (result == DPFPDD_E_DEVICE_BUSY) {
-			std::cerr << "El dispositivo fue abierto por otro proceso: " << device_name << std::endl;
-			return -1;
-		}
+		switch (result){
+			case DPFPDD_SUCCESS:
+				std::cout << "Dispositivo cerrado exitosamente: " << result << std::endl;
+				return 0;
+			
+			case DPFPDD_E_FAILURE:
+				std::cerr << "Fallo inesperado al cerrar dispositivo: " << result << std::endl;
+				break;
+			
+			case DPFPDD_E_INVALID_DEVICE:
+				std::cerr << "No se encuentra el dispositivo que se quiere cerrar. " << std::endl;
+				break;
+				
+			case DPFPDD_E_DEVICE_BUSY:
+				std::cerr << "El dispositivo esta ocupado por otro proceso. " << std::endl;
+				break;
 
-		if (result == DPFPDD_E_DEVICE_FAILURE) {
-			std::cerr << "Error al abrir dispositivo: " << device_name << std::endl;
-			return -1;
+			case DPFPDD_E_DEVICE_FAILURE:
+				std::cerr << "Error al cerrar dispositivo. " << std::endl;
+				break;
 		}
 
 		return -1;
@@ -105,24 +134,27 @@ extern "C" {
 		DPFPDD_DEV_STATUS device_status;
 		device_status.size = sizeof(device_status);
 		result = dpfpdd_get_device_status(hReader, &device_status);
-		if (result == DPFPDD_SUCCESS) {
-			std::cout << "Status de dispositivo obtenido exitosamente: " << result << std::endl;
-			status = device_status;
-		}
+		switch (result){
+			case DPFPDD_SUCCESS:
+				std::cout << "Status de dispositivo obtenido exitosamente: " << result << std::endl;
+				status = device_status;
+				return 0;
+			
+			case DPFPDD_E_FAILURE:
+				std::cerr << "Fallo inesperado al obtener status del dispositivo: " << result << std::endl;
+				break;
+			
+			case DPFPDD_E_INVALID_DEVICE:
+				std::cerr << "Dispositivo invalido, no se puede obtener el status: " << result << std::endl;
+				break;
+				
+			case DPFPDD_E_DEVICE_BUSY:
+				std::cerr << "El dispositivo esta ocupado por otro proceso. " << std::endl;
+				break;
 
-		if (result == DPFPDD_E_FAILURE) {
-			std::cerr << "Fallo inesperado al obtener status del dispositivo: " << result << std::endl;
-			return -1;
-		}
-
-		if (result == DPFPDD_E_INVALID_DEVICE) {
-			std::cerr << "Dispositivo invalido, no se puede obtener el status: " << result << std::endl;
-			return -1;
-		}
-
-		if (result == DPFPDD_E_MORE_DATA) {
-			std::cerr << "Memoria alojada insuficiente, no se puede obtener el status: " << result << std::endl;
-			return -1;
+			case DPFPDD_E_MORE_DATA:
+				std::cerr << "Memoria alojada insuficiente, no se puede obtener el status: " << result << std::endl;
+				break;
 		}
 
 		return -1;
@@ -131,7 +163,7 @@ extern "C" {
 	__declspec(dllexport) int capture_fid(DPFPDD_DEV hReader, unsigned int &fid_size, unsigned char* &fid_data){
 		int result;
 		std::cout << "Capturando huella... " << std::endl;
-		// Generar parametros de captura
+		// Generate capture params
 		DPFPDD_IMAGE_FMT image_fmt = DPFPDD_IMG_FMT_ANSI381;
 		DPFPDD_IMAGE_PROC image_proc = 0;
 		unsigned int image_res = 500;
@@ -143,48 +175,44 @@ extern "C" {
 		DPFPDD_CAPTURE_RESULT capture_result = { sizeof(DPFPDD_CAPTURE_RESULT) }; // <-- Aqui se obtiene el resultado de la captura
 
 		
-		// Primera llamada de dpfpdd_capture para obtener el tamaño de imagen necesario para image_data 
+		// first dpfpdd_capture call to get the needed size for image_data 
 		result = dpfpdd_capture(hReader, &capture_param, timeout, &capture_result, &image_size, image_data);
 		if (result == DPFPDD_E_MORE_DATA) {
-			// Asignar memoria para la imagen
+			// Asign image memory
 			image_data = new unsigned char[image_size];
 
-			// Segunda llamada con memoria asignada
+			// Second call with the correct size on image_data
 			result = dpfpdd_capture(hReader, &capture_param, timeout, &capture_result, &image_size, image_data);
 			std::cerr << "Resultado de captura: " << result << std::endl;
-			if (result == DPFPDD_SUCCESS) {
-				std::cout << "Captura exitosa: " << result << std::endl;
-				fid_size = image_size;
-				fid_data = image_data;
-			}
+			switch (result){
+				case DPFPDD_SUCCESS:
+					std::cout << "Captura exitosa: " << result << std::endl;
+					fid_size = image_size;
+					fid_data = image_data;
+					return 0;
+				
+				case DPFPDD_E_FAILURE:
+					std::cerr << "Fallo inesperado al capturar: " << result << std::endl;
+					break;
+				
+				case DPFPDD_E_INVALID_DEVICE:
+					std::cerr << "Handle de dispositivo invalido, no se puede capturar: " << result << std::endl;
+					break;
+					
+				case DPFPDD_E_DEVICE_BUSY:
+					std::cerr << "Dispositivo ocupado, no se puede capturar: " << result << std::endl;
+					break;
 
-			if (result == DPFPDD_E_FAILURE) {
-				std::cerr << "Fallo inesperado al capturar: " << result << std::endl;
-				return -1;
-			}
+				case DPFPDD_E_MORE_DATA:
+					std::cerr << "La memoria alojada en image_data es insuficiente, no se puede capturar: " << result << std::endl;
+					break;
 
-			if (result == DPFPDD_E_INVALID_DEVICE) {
-				std::cerr << "Handle de dispositivo invalido, no se puede capturar: " << result << std::endl;
-				return -1;
-			}
-
-			if (result == DPFPDD_E_DEVICE_BUSY) {
-				std::cerr << "Dispositivo ocupado, no se puede capturar: " << result << std::endl;
-				return -1;
-			}
-
-			if (result == DPFPDD_E_MORE_DATA) {
-				std::cerr << "La memoria alojada en image_data es insuficiente, no se puede capturar: " << result << std::endl;
-				return -1;
-			}
-
-			if (result == DPFPDD_E_INVALID_PARAMETER) {
-				std::cerr << "Parametro invalido, no se puede capturar: " << result << std::endl;
-				return -1;
+				case DPFPDD_E_INVALID_PARAMETER:
+					std::cerr << "Parametro invalido, no se puede capturar: " << result << std::endl;
+					break;
 			}
 		} else {
 			std::cerr << "Error al capturar desde el dispositivo " << std::endl;
-			return -1;
 		}
 
 		return -1;
@@ -198,35 +226,36 @@ extern "C" {
 		unsigned int fmd_size = MAX_FMD_SIZE; 
 		unsigned char* fmd  = new unsigned char[fmd_size];
 		result = dpfj_create_fmd_from_fid(fid_type, fid_data, fid_size, fmd_type, fmd, &fmd_size);
-		if (result == DPFPDD_SUCCESS) {
-			std::cout << "FMD generado exitosamente: " << result << std::endl;
-			if (fmd_size > 0 && fmd != nullptr) {
-				std::cout << "Tamaño del FMD: " << fmd_size << std::endl;
-				std::cout << "Contenido del FMD (hexadecimal): ";
-				for (unsigned int i = 0; i < fmd_size; ++i) {
-					std::cout << std::hex << static_cast<int>(fmd[i]) << " ";
+		switch (result){
+			case DPFPDD_SUCCESS:
+				if (fmd_size > 0 && fmd != nullptr) {
+					std::cout << "FMD generado exitosamente: " << result << std::endl;
+					std::cout << "Tamaño del FMD: " << fmd_size << std::endl;
+					// std::cout << "Contenido del FMD (hexadecimal): ";
+					// for (unsigned int i = 0; i < fmd_size; ++i) {
+					// 	std::cout << std::hex << static_cast<int>(fmd[i]) << " ";
+					// }
+
+					generated_fmd = fmd;
+					generated_fmd_size = fmd_size;
+					
+					std::cout << std::dec << std::endl;
+				} else{
+					std::cout << "FMD generado con errores: " << result << std::endl;
 				}
+				return 0;
+			
+			case DPFPDD_E_MORE_DATA:
+				std::cerr << "Se obtuvo la informacion para generar el FMD pero la memoria alojada en fmd_size es insuficiente: " << result << std::endl;
+				break;
 
-				generated_fmd = fmd;
-				generated_fmd_size = fmd_size;
-				
-				std::cout << std::dec << std::endl;
-			}
-		}
+			case DPFPDD_E_INVALID_PARAMETER:
+				std::cerr << "Parametro invalido, no se puede generar el FMD: " << result << std::endl;
+				break;
 
-		if (result == DPFPDD_E_MORE_DATA) {
-			std::cerr << "Se obtuvo la informacion para generar el FMD pero la memoria alojada en fmd_size es insuficiente: " << result << std::endl;
-			return -1;
-		}
-
-		if (result == DPFPDD_E_INVALID_PARAMETER) {
-			std::cerr << "Parametro invalido, no se puede generar el FMD: " << result << std::endl;
-			return -1;
-		}
-
-		if (result == DPFJ_E_FAILURE) {
-			std::cerr << "Error al crear FMD: " << result << std::endl;
-			return -1;
+			case DPFPDD_E_FAILURE:
+				std::cerr << "Error al crear FMD: " << result << std::endl;
+				break;
 		}
 
 		return -1;
@@ -259,15 +288,15 @@ extern "C" {
 			return -1;
 		}
 
-		// Obtener el tamaño del archivo (FMD)
-		inFile.seekg(0, std::ios::end);  // Mover al final para obtener el tamaño
+		// Get FMD file size
+		inFile.seekg(0, std::ios::end);  // Move to the end to get total size
 		std::streamsize fmd_size2 = inFile.tellg();
-		inFile.seekg(0, std::ios::beg);  // Volver al inicio del archivo
+		inFile.seekg(0, std::ios::beg);  // Get back to file start
 
-		// Crear un buffer para almacenar el FMD
+		// Create buffer to store FMD
 		std::vector<unsigned char> fmd2(fmd_size);
 
-		// Leer los datos del archivo al buffer
+		// Read file data to buffer
 		if (inFile.read(reinterpret_cast<char*>(fmd2.data()), fmd_size2)) {
 			std::cout << "FMD cargado exitosamente. Tamaño: " << fmd_size2 << std::endl;
 			fmd_size = fmd_size2;
@@ -277,14 +306,14 @@ extern "C" {
 			std::cerr << "Error al leer el archivo FMD." << std::endl;
 		}
 
-		// Comprobar el estado del flujo antes de cerrar
+		// Check file state before closing
 		if (inFile.good()) {
 			std::cout << "El archivo se leyó correctamente, cerrando..." << std::endl;
 		} else {
 			std::cerr << "Hubo un problema antes de cerrar el archivo." << std::endl;
 		}
 
-		// Cerrar el archivo
+		// Close file
 		inFile.close();
 		std::cout << "Archivo cerrado exitosamente." << std::endl;
 		return 0;
@@ -300,6 +329,7 @@ extern "C" {
 			std::cout << "Comparacion terminada, puntuacion: " << score << std::endl;
 			if (score < 2000){
 				std::cout << "Las huellas coinciden." << std::endl;
+				return 1;
 			} else {
 				std::cout << "Las huellas no coinciden." << std::endl;
 			}
@@ -310,14 +340,117 @@ extern "C" {
 		return 0;
 	}
 
+	std::string convert_fmd_to_base64(const unsigned char* fmd, unsigned int fmd_size) {
+		BIO* bio, *b64;
+		BUF_MEM* bufferPtr;
+
+		b64 = BIO_new(BIO_f_base64());
+		bio = BIO_new(BIO_s_mem());
+		bio = BIO_push(b64, bio);
+
+		// Set BIO to not insert line breaks
+		BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+
+		BIO_write(bio, fmd, fmd_size);
+		BIO_flush(bio);
+		BIO_get_mem_ptr(bio, &bufferPtr);
+
+		std::string base64_data(bufferPtr->data, bufferPtr->length);
+		BIO_free_all(bio);
+
+		return base64_data;
+	}
+
+	std::vector<unsigned char> convert_base64_to_fmd(const std::string& base64_data) {
+		BIO* bio, *b64;
+		std::vector<unsigned char> fmd;
+
+		b64 = BIO_new(BIO_f_base64());
+		bio = BIO_new_mem_buf(base64_data.data(), base64_data.length());
+		bio = BIO_push(b64, bio);
+
+		// Set BIO to not insert line breaks
+		BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+
+		// set FMD vector size based on expected lenght
+		fmd.resize((base64_data.length() * 3) / 4);
+
+		// Leer desde el BIO Base64 y llenar el vector fmd
+		int decoded_length = BIO_read(bio, fmd.data(), fmd.size());
+		if (decoded_length <= 0) {
+			std::cerr << "Error: No se pudo decodificar los datos Base64 correctamente." << std::endl;
+		} else {
+			fmd.resize(decoded_length);  // Adjust size of decoded data
+		}
+
+		BIO_free_all(bio);
+		return fmd;
+	}
+
+	__declspec(dllexport) DPFPDD_DEV get_reader_data(){
+		init_library();
+		std::string device_name;
+		search_devices(device_name);
+		DPFPDD_DEV hReader = NULL; // Reader handler
+		open_device(device_name, hReader);
+
+		return hReader;
+	}
+
+	__declspec(dllexport) const char* python_read_fingerprint_and_get_base64_string() {
+		DPFPDD_DEV hReader = get_reader_data();
+		// Get First Finger
+		unsigned int fid_size;
+		unsigned char* fid_data;
+		capture_fid(hReader, fid_size, fid_data);
+
+		unsigned int fmd_size = MAX_FMD_SIZE; 
+		unsigned char* fmd  = new unsigned char[fmd_size];
+		transform_fid_to_fmd(fid_size, fid_data, fmd, fmd_size);
+
+		// Returns FMD as base64
+		std::string fmd_base64_str = convert_fmd_to_base64(fmd, fmd_size);
+		
+		// Adds result to heap
+		char* result = new char[fmd_base64_str.size() + 1]; // +1 for null terminator
+		std::strcpy(result, fmd_base64_str.c_str());
+		
+		close_device(hReader);
+		return result; // Return pointer to string on heap
+	}
+
+	__declspec(dllexport) int python_compare_base64_string_with_finger(const char* input_base64_str){
+		std::string base64_str = std::string(input_base64_str);
+		std::cout << "Received string: " << base64_str << std::endl;
+
+		DPFPDD_DEV hReader = get_reader_data();
+		unsigned int fid_size;
+		unsigned char* fid_data;
+		capture_fid(hReader, fid_size, fid_data);
+
+		unsigned int fmd_size = MAX_FMD_SIZE; 
+		unsigned char* fmd  = new unsigned char[fmd_size];
+		transform_fid_to_fmd(fid_size, fid_data, fmd, fmd_size);
+
+		std::vector<unsigned char> fmd_vect = convert_base64_to_fmd(base64_str);
+		unsigned int fmd2_size = fmd_vect.size(); 
+		unsigned char* fmd2 = fmd_vect.data();
+
+		unsigned int score;
+		unsigned int comparision_result;
+		comparision_result = compare_fmds(fmd_size, fmd, fmd2_size, fmd2, score);
+		close_device(hReader);
+		return comparision_result;
+	}
+
 	__declspec(dllexport) int main() {
-		// DPFPDD_DEV_INFO devInfo;
+		// Testing code, you can ignore it or use it compiling this as a .exe instead of .dll :)
 		init_library();
 		std::string device_name;
 		search_devices(device_name);
 		std::cout << "DEVICE NAME: " << device_name << std::endl;
 	
-		DPFPDD_DEV hReader = NULL; // Manejar del lector
+		DPFPDD_DEV hReader = NULL; // Reader handler
 		open_device(device_name, hReader);
 
 		DPFPDD_DEV_STATUS device_status;
@@ -332,17 +465,30 @@ extern "C" {
 		unsigned char* fmd  = new unsigned char[fmd_size];
 		transform_fid_to_fmd(fid_size, fid_data, fmd, fmd_size);
 
-		// Get Second Finger
-		unsigned int fid2_size;
-		unsigned char* fid2_data;
-		capture_fid(hReader, fid2_size, fid2_data);
+		std::string fmd_string = convert_fmd_to_base64(fmd, fmd_size);
+		std::cout << "FMD String: " << fmd_string << std::endl;
+		
+		std::vector<unsigned char> fmd_vect = convert_base64_to_fmd(fmd_string);
 
-		unsigned int fmd2_size = MAX_FMD_SIZE; 
-		unsigned char* fmd2  = new unsigned char[fmd2_size];
-		transform_fid_to_fmd(fid2_size, fid2_data, fmd2, fmd2_size);
+		unsigned int fmd2_size = fmd_vect.size(); 
+		unsigned char* fmd2 = fmd_vect.data();
+
+		std::cout << "Size 1: " << fmd_size << std::endl;
+		std::cout << "Size 2: " << fmd2_size << std::endl;
+		bool areEqual = fmd2_size == fmd_size;
+		std::cout << "Are sizes equal?: " << areEqual << std::endl;
 
 		unsigned int score;
 		compare_fmds(fmd_size, fmd, fmd2_size, fmd2, score);
+		// Get Second Finger
+		// unsigned int fid2_size;
+		// unsigned char* fid2_data;
+		// capture_fid(hReader, fid2_size, fid2_data);
+
+		// unsigned int fmd2_size = MAX_FMD_SIZE; 
+		// unsigned char* fmd2  = new unsigned char[fmd2_size];
+		// transform_fid_to_fmd(fid2_size, fid2_data, fmd2, fmd2_size);
+
 		// save_fmd(fmd_size, fmd, "test_savefmd.bin");
 
 
