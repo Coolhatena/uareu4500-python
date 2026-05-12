@@ -340,7 +340,10 @@ extern "C" {
 		return 0;
 	}
 
-	std::string convert_fmd_to_base64(const unsigned char* fmd, unsigned int fmd_size) {
+	std::string convert_bytes_to_base64(
+		const unsigned char* data,
+		unsigned int data_size
+	) {
 		BIO* bio, *b64;
 		BUF_MEM* bufferPtr;
 
@@ -351,7 +354,7 @@ extern "C" {
 		// Set BIO to not insert line breaks
 		BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
 
-		BIO_write(bio, fmd, fmd_size);
+		BIO_write(bio, data, data_size);
 		BIO_flush(bio);
 		BIO_get_mem_ptr(bio, &bufferPtr);
 
@@ -359,6 +362,13 @@ extern "C" {
 		BIO_free_all(bio);
 
 		return base64_data;
+	}
+
+	std::string convert_fmd_to_base64(
+		const unsigned char* fmd,
+		unsigned int fmd_size
+	) {
+		return convert_bytes_to_base64(fmd, fmd_size);
 	}
 
 	std::vector<unsigned char> convert_base64_to_fmd(const std::string& base64_data) {
@@ -397,6 +407,12 @@ extern "C" {
 		return hReader;
 	}
 
+	char* allocate_c_string(const std::string& value) {
+		char* result = new char[value.size() + 1];
+		std::strcpy(result, value.c_str());
+		return result;
+	}
+
 	__declspec(dllexport) const char* python_read_fingerprint_and_get_base64_string() {
 		DPFPDD_DEV hReader = get_reader_data();
 		// Get First Finger
@@ -411,12 +427,48 @@ extern "C" {
 		// Returns FMD as base64
 		std::string fmd_base64_str = convert_fmd_to_base64(fmd, fmd_size);
 		
-		// Adds result to heap
-		char* result = new char[fmd_base64_str.size() + 1]; // +1 for null terminator
-		std::strcpy(result, fmd_base64_str.c_str());
+		char* result = allocate_c_string(fmd_base64_str);
 		
+		delete[] fid_data;
+		delete[] fmd;
 		close_device(hReader);
 		return result; // Return pointer to string on heap
+	}
+
+	__declspec(dllexport) const char* python_capture_full() {
+		DPFPDD_DEV hReader = get_reader_data();
+		if (hReader == NULL) {
+			return nullptr;
+		}
+
+		unsigned int fid_size = 0;
+		unsigned char* fid_data = nullptr;
+		if (capture_fid(hReader, fid_size, fid_data) != 0) {
+			close_device(hReader);
+			return nullptr;
+		}
+
+		unsigned int fmd_size = MAX_FMD_SIZE;
+		unsigned char* fmd = new unsigned char[fmd_size];
+		if (transform_fid_to_fmd(fid_size, fid_data, fmd, fmd_size) != 0) {
+			delete[] fid_data;
+			delete[] fmd;
+			close_device(hReader);
+			return nullptr;
+		}
+
+		std::string fid_base64_str = convert_bytes_to_base64(fid_data, fid_size);
+		std::string fmd_base64_str = convert_fmd_to_base64(fmd, fmd_size);
+		std::string payload =
+			"{\"fid_base64\":\"" + fid_base64_str +
+			"\",\"fmd_base64\":\"" + fmd_base64_str + "\"}";
+
+		char* result = allocate_c_string(payload);
+
+		delete[] fid_data;
+		delete[] fmd;
+		close_device(hReader);
+		return result;
 	}
 
 	__declspec(dllexport) int python_compare_base64_string_with_finger(const char* input_base64_str){
@@ -439,8 +491,15 @@ extern "C" {
 		unsigned int score;
 		unsigned int comparision_result;
 		comparision_result = compare_fmds(fmd_size, fmd, fmd2_size, fmd2, score);
+
+		delete[] fid_data;
+		delete[] fmd;
 		close_device(hReader);
 		return comparision_result;
+	}
+
+	__declspec(dllexport) void python_free_string(const char* value) {
+		delete[] value;
 	}
 
 	__declspec(dllexport) int main() {
