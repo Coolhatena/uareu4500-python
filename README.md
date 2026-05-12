@@ -9,6 +9,13 @@ and some other ones (marked with "python_" at the start of their name) that use 
 entire functionalities that can be used on Python to get specific values or results (Like get get the fingerprint reading as a string
 or compare a reading stored as string with a reading from the scanner).
 
+## Python API
+Current high-level functions exposed by `uareu4500.py`:
+
+- `getFingerReadingAsBase64String()`: captures one fingerprint and returns the generated FMD template as Base64.
+- `captureFull()`: captures one fingerprint and returns a dictionary with both `fid_base64` and `fmd_base64` from the same scan.
+- `compareBase64StringWithFingerReading(base64_string)`: compares a stored Base64 FMD against a new scan.
+
 ## Compiling
 I made all the compilations of this project on Windows (Thats my target OS so develop and compiling there made everything smoother) using gcc (MSYS)
 
@@ -44,6 +51,5 @@ If you want to make your own python library based on this project, consider that
 fingerprint_lib = ctypes.CDLL('./uareu4500.dll', winmode=0)
 ```
 If this argument its not provided, the code will just not recognize any of the DLL dependencies.
-
 
 
