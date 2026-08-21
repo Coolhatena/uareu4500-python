@@ -1,3 +1,5 @@
+
+
 # U.ARE.U 4500 on Python  
 I needed to control a Digital Persona U.ARE.U 4500 Fingerprint Reader using Python to make an integration with LabVIEW, 
 but the only SDK's i found were for C++, Java and C# .NET, so i decided to make my own wrapper for the C++ SDK and 
@@ -6,7 +8,7 @@ manipulate it from Python
 ## Concept
 Basically all the heavy lifting is done on uareu4500.cpp, here i made some functions to manipulate the SDK
 and some other ones (marked with "python_" at the start of their name) that use all those manipulation functions to create
-entire functionalities that can be used on Python to get specific values or results (Like get get the fingerprint reading as a string
+entire functionalities that can be used on Python to get specific values or results (Like get the fingerprint reading as a string
 or compare a reading stored as string with a reading from the scanner).
 
 ## Compiling
@@ -44,6 +46,3 @@ If you want to make your own python library based on this project, consider that
 fingerprint_lib = ctypes.CDLL('./uareu4500.dll', winmode=0)
 ```
 If this argument its not provided, the code will just not recognize any of the DLL dependencies.
-
-
-
